@@ -1,6 +1,6 @@
 from odoo import models, fields
-from ..schemas.objects import BlogPost
-from ..schemas.website_blog import BlogPostSortInput
+from .objects import BlogPost
+from website_blog import BlogPostSortInput
 from ..graphql.dynamic_registry import DynamicQuery
 
 class ExtendedBlogPost():
