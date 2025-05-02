@@ -1,63 +1,145 @@
+from odoo import models, api
 import graphene
+from odoo.addons.graphql_base import OdooObjectType
 
-from odoo import models
-from pprint import pprint
+class DynamicQueryMixin(models.AbstractModel):
+    _name = 'dynamic.query.mixin'
+    _description = 'Mixin para criação automática da query'
+    _abstract = True
 
-#from odoo.addons.graphql_alokai.graphql.registry import query_registry, mutation_registry, type_registry
-#from my_addon_project.alokai_addons.graphql_base import OdooObjectType
-from .registry import type_registry
-
-class DynamicQuery(models.AbstractModel):
-    _name='dynamic.query'
-    _description='Criação automática da query'
-
-    @staticmethod
-    def resolve_fields(fields, type_cls, mut_cls, resolver=None):
-        print(f"Antes: campos em {type_cls.__name__} = {list(type_cls._meta.fields.keys())}")
-
-        # returns 2 dictionaries with fields and resolvers to add
-        fields_dict, resolver_dict = DynamicQuery._get_properties_dict(fields)
-
-
-
-        for cls in type_registry:
-            if cls == type_cls:
-                for field in fields_dict:
-                    field_type = graphene.Field(fields_dict[field])
-                    print(f'field={field} type={fields_dict[field]} / {field_type} cls={cls.__name__}')
-                    setattr(type_cls, field, field_type)
-                    type_cls._meta.fields[field] = field_type
-                if resolver:
-                    for field in resolver_dict:
-                        setattr(cls, f"resolve_{field}", resolver_dict[field])
-
-        for field_name, field in type_cls._meta.fields.items():
-            print(f"- {field_name}: {type_cls(field)}")
-        print(f"Depois: campos em {type_cls.__name__} = {list(type_cls._meta.fields.keys())}")
-
-
-    def _get_properties_dict(fields):
+    @api.model
+    @api.model
+    def get_graphql_fields_and_resolvers(self):
         fields_dict = {}
         resolver_dict = {}
-        for field_name, fld_type in fields.items():
-            if fld_type in ('char', 'html', 'text', 'selection'):
-                fields_dict[field_name] = graphene.String(required=False)
-            elif fld_type in ('float', 'monetary'):
-                fields_dict[field_name] = graphene.Float()
-            elif fld_type == 'integer':
-                fields_dict[field_name] = graphene.Int()
-            '''elif fld_type == 'many2one':
-                fields_dict[field_name] = graphene.Field(lambda: OdooObjectType)
-            elif fld_type in ('one2many', 'many2many'):
-                fields_dict[field_name] = graphene.List(lambda: OdooObjectType)'''
 
-            resolver_dict[field_name] = DynamicQuery._generate_resolver_method(field_name)
+        model_cls = type(self)
+
+        graphql_fields = getattr(model_cls, '_graphql_fields', {})
+
+        if isinstance(graphql_fields, list):
+            graphql_fields = {name: True for name in graphql_fields}
+
+        for field_name, config in graphql_fields.items():
+            field = self._fields.get(field_name)
+            if not field:
+                continue
+
+            # Configuração
+            add_resolver = True
+            if isinstance(config, dict):
+                add_resolver = config.get('res', True)
+            elif isinstance(config, bool):
+                add_resolver = config
+
+            gfield = self._map_field_to_graphene(field)
+            if gfield:
+                fields_dict[field_name] = gfield
+                if add_resolver:
+                    resolver_dict[field_name] = self._generate_resolver_method(field_name)
 
         return fields_dict, resolver_dict
 
-    def _generate_resolver_method(field_name):
-        @staticmethod
-        def resolver_method(parent, info, field_name=field_name):
-            return getattr(parent, field_name, None)
+    def _map_field_to_graphene(self, field):
+        if field.type in ('char', 'html', 'text', 'selection'):
+            return graphene.String(description=field.string)
+        elif field.type in ('float', 'monetary'):
+            return graphene.Float(description=field.string)
+        elif field.type == 'integer':
+            return graphene.Int(description=field.string)
+        elif field.type == 'many2one':
+            return graphene.Field(lambda: OdooObjectType)
+        elif field.type in ('one2many', 'many2many'):
+            return graphene.List(lambda: OdooObjectType)
+        elif field.type == 'boolean':
+            return graphene.Boolean(description=field.string)
+        elif field.type == 'date':
+            return graphene.String(description=field.string)
+        elif field.type == 'datetime':
+            return graphene.String(description=field.string)
+        return None
 
-        return resolver_method
+    def _generate_resolver_method(self, field_name):
+        def resolver(parent, info):
+            return getattr(parent, field_name, None)
+        return resolver
+
+    def update_graphql_type(self, model_name, target_class):
+        """
+        Atualiza a classe GraphQL, adicionando campos e resolvers definidos em _graphql_fields.
+        """
+        # Obtém os campos e resolvers definidos no modelo
+        print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        env=self.env
+        fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
+
+        # Obtém os campos já existentes no tipo GraphQL
+        existing_fields = set()
+        if hasattr(target_class, '_meta') and hasattr(target_class._meta, 'fields'):
+            existing_fields = set(target_class._meta.fields.keys())
+
+        for name, field in fields_dict.items():
+            if name in existing_fields: # verifica a existencia do campo no  graphql
+                continue
+            if not isinstance(field, graphene.Field):
+                field = graphene.Field(field)
+            # Adiciona o campo à classe
+            self.add_field_to_type(target_class, name, field)
+
+            # Adiciona o resolver se estiver definido
+            resolver = resolvers.get(name)
+            if resolver:
+                setattr(target_class, f'resolve_{name}', resolver)
+        print(f"Depois: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        return target_class
+
+    def add_field_to_type(self, type_obj, field_name, field_type, resolver=None):
+        """
+        Adiciona um novo campo ao tipo GraphQL, sem afetar os campos existentes.
+        :param type_obj: O tipo GraphQL (por exemplo, `BlogPost`).
+        :param field_name: O nome do campo a ser adicionado.
+        :param field_type: O tipo do campo (por exemplo, `graphene.String()`).
+        :param resolver: A função que resolve o valor do campo (opcional).
+        """
+        # Adiciona o campo ao tipo, se ele não existir
+        if not hasattr(type_obj, field_name):
+            # Adiciona o campo à classe (o tipo GraphQL)
+            setattr(type_obj, field_name, field_type)
+
+            # Adiciona o resolver (se fornecido)
+            if resolver:
+                setattr(type_obj, f"resolve_{field_name}", resolver)
+
+            # Adiciona o campo à _meta.fields (para facilitar busca e manutenção)
+            if hasattr(type_obj, '_meta') and hasattr(type_obj._meta, 'fields'):
+                type_obj._meta.fields[field_name] = field_type
+
+# Alternativa para fazer campos many2one, many2many e one2many, funciona melhor que o atual, só tenho de indicar qual o modelo
+        '''
+        elif field.type == 'many2one':
+            # Criar um tipo específico para o modelo relacionado
+            related_model = field.comodel_name.replace('.', '_')
+            return graphene.Field(
+                type(related_model, (OdooObjectType,), {
+                    'id': graphene.ID(required=True),
+                    'name': graphene.String(),
+                    'Meta': type('Meta', (), {
+                        'name': related_model,
+                        'description': f'Type for {field.comodel_name}'
+                    })
+                })
+            )
+        elif field.type in ('one2many', 'many2many'):
+            # Criar um tipo específico para a lista de modelos relacionados
+            related_model = field.comodel_name.replace('.', '_')
+            return graphene.List(
+                type(related_model, (OdooObjectType,), {
+                    'id': graphene.ID(required=True),
+                    'name': graphene.String(),
+                    'Meta': type('Meta', (), {
+                        'name': related_model,
+                        'description': f'Type for {field.comodel_name}'
+                    })
+                })
+            )
+            '''

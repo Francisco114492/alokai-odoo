@@ -66,8 +66,9 @@ class GraphQLController(http.Controller, GraphQLControllerMixin):
 
     def __init__(self):
         super(GraphQLController, self).__init__()
+        print("Loading schema")
         self._graphql_schema = build_alokai_schema().graphql_schema
-
+        print("Schema loaded")
     def _process_request(self, schema, data):
         # Set the alokai_debug_mode value that exist in the settings
         ICP = http.request.env['ir.config_parameter'].sudo()

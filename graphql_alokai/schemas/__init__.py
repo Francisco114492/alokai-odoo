@@ -18,4 +18,3 @@ from . import mailing_list
 from . import website
 from . import website_blog
 from . import website_page
-from . import extend
