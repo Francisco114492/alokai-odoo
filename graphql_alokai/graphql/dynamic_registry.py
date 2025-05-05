@@ -26,7 +26,6 @@ class DynamicQueryMixin(models.AbstractModel):
                 continue
 
             # Configuração
-            add_resolver = True
             if isinstance(config, dict):
                 add_resolver = config.get('res', True)
             elif isinstance(config, bool):
@@ -35,8 +34,7 @@ class DynamicQueryMixin(models.AbstractModel):
             gfield = self._map_field_to_graphene(field)
             if gfield:
                 fields_dict[field_name] = gfield
-                if add_resolver:
-                    resolver_dict[field_name] = self._generate_resolver_method(field_name)
+                resolver_dict[field_name] = self._generate_resolver_method(field_name)
 
         return fields_dict, resolver_dict
 
@@ -48,9 +46,31 @@ class DynamicQueryMixin(models.AbstractModel):
         elif field.type == 'integer':
             return graphene.Int(description=field.string)
         elif field.type == 'many2one':
-            return graphene.Field(lambda: OdooObjectType)
+            # Criar um tipo específico para o modelo relacionado
+            related_model = field.comodel_name.replace('.', '_')
+            return graphene.Field(
+                type(related_model, (OdooObjectType,), {
+                    'id': graphene.ID(required=True),
+                    'name': graphene.String(),
+                    'Meta': type('Meta', (), {
+                        'name': related_model,
+                        'description': f'Type for {field.comodel_name}'
+                    })
+                })
+            )
         elif field.type in ('one2many', 'many2many'):
-            return graphene.List(lambda: OdooObjectType)
+            # Criar um tipo específico para a lista de modelos relacionados
+            related_model = field.comodel_name.replace('.', '_')
+            return graphene.List(
+                type(related_model, (OdooObjectType,), {
+                    'id': graphene.ID(required=True),
+                    'name': graphene.String(),
+                    'Meta': type('Meta', (), {
+                        'name': related_model,
+                        'description': f'Type for {field.comodel_name}'
+                    })
+                })
+            )
         elif field.type == 'boolean':
             return graphene.Boolean(description=field.string)
         elif field.type == 'date':

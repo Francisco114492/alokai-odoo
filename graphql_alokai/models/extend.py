@@ -7,7 +7,7 @@ class ExtendedBlogPost(models.Model, DynamicQueryMixin):
     _name = 'blog.post'
     _inherit = ['blog.post', 'dynamic.query.mixin']
     other_author_name = fields.Char(string="Other Author Name")
-    internal_notes = fields.Many2many(string="Internal Notes")
+    internal_notes = fields.One2many('website',string="Internal Notes")
 
     _graphql_fields = {
         "other_author_name": True,  # expõe o campo com resolver
