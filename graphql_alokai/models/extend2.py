@@ -3,6 +3,8 @@ from ..schemas.objects import Company
 from .dynamic_registry import DynamicQueryMixin
 
 
+
+
 class ExtendedBlogPost(models.Model, DynamicQueryMixin):
     _name = 'res.company'
     _inherit = ['res.company', 'dynamic.query.mixin']
@@ -14,9 +16,5 @@ class ExtendedBlogPost(models.Model, DynamicQueryMixin):
         "internal_notes_2": {"res": False},  # expõe o campo sem resolver
         "teaser": {"res": True}  # campo herdado, mas adiciona o resolver
     }
-    def _register_hook(self):
-        super(ExtendedBlogPost, self)._register_hook()
-        self.update_graphql_type( 'res.company', Company)
-
-
+    _graphql_type = Company
 

@@ -84,11 +84,12 @@ class DynamicQueryMixin(models.AbstractModel):
             return getattr(parent, field_name, None)
         return resolver
 
-    def update_graphql_type(self, model_name, target_class):
+    def update_graphql_type(self, model_name):
         """
         Atualiza a classe GraphQL, adicionando campos e resolvers definidos em _graphql_fields.
         """
         # Obtém os campos e resolvers definidos no modelo
+        target_class = self.env[model_name]._graphql_type
         print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
         env=self.env
         fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
@@ -134,32 +135,25 @@ class DynamicQueryMixin(models.AbstractModel):
             if hasattr(type_obj, '_meta') and hasattr(type_obj._meta, 'fields'):
                 type_obj._meta.fields[field_name] = field_type
 
-# Alternativa para fazer campos many2one, many2many e one2many, funciona melhor que o atual, só tenho de indicar qual o modelo
-        '''
-        elif field.type == 'many2one':
-            # Criar um tipo específico para o modelo relacionado
-            related_model = field.comodel_name.replace('.', '_')
-            return graphene.Field(
-                type(related_model, (OdooObjectType,), {
-                    'id': graphene.ID(required=True),
-                    'name': graphene.String(),
-                    'Meta': type('Meta', (), {
-                        'name': related_model,
-                        'description': f'Type for {field.comodel_name}'
-                    })
-                })
-            )
-        elif field.type in ('one2many', 'many2many'):
-            # Criar um tipo específico para a lista de modelos relacionados
-            related_model = field.comodel_name.replace('.', '_')
-            return graphene.List(
-                type(related_model, (OdooObjectType,), {
-                    'id': graphene.ID(required=True),
-                    'name': graphene.String(),
-                    'Meta': type('Meta', (), {
-                        'name': related_model,
-                        'description': f'Type for {field.comodel_name}'
-                    })
-                })
-            )
-            '''
+    def _get_subclasses(self):
+        mixin_name = self._name
+        result = []
+        for model_name in self.env:
+            model = self.env[model_name]
+            model_cls = type(model)
+            inherits = getattr(model_cls, '_inherit', [])
+            if isinstance(inherits, str):
+                inherits = [inherits]
+            if mixin_name in inherits or issubclass(model_cls, self.__class__):
+                result.append(model_name)
+        return result
+
+    def _register_hook(self):
+        super()._register_hook()
+        if self._name == 'dynamic.query.mixin': # avoid executing the function for the mixin itself
+            return
+        sub_cls=self._get_subclasses()
+        print(sub_cls)
+        for cls in sub_cls:
+            print(cls)
+            self.update_graphql_type(cls)

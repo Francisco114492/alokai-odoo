@@ -14,8 +14,7 @@ class ExtendedBlogPost(models.Model, DynamicQueryMixin):
         "internal_notes": {"res": False},  # expõe o campo sem resolver
         "teaser": {"res": True}  # campo herdado, mas adiciona o resolver
     }
-    def _register_hook(self):
-        super(ExtendedBlogPost, self)._register_hook()
-        self.update_graphql_type( 'blog.post', BlogPost)
+    _graphql_type = BlogPost
+
 
 
