@@ -1,15 +1,25 @@
 from odoo import models, api
 import graphene
 from odoo.addons.graphql_base import OdooObjectType
+import logging
 
-class DynamicQueryMixin(models.AbstractModel):
+_logger = logging.getLogger(__name__)
+
+class DynamicFieldsMixin(models.AbstractModel):
     _name = 'dynamic.query.mixin'
     _description = 'Mixin para criação automática da query'
     _abstract = True
 
     @api.model
-    @api.model
     def get_graphql_fields_and_resolvers(self):
+        '''
+        Returns dictionaries of GraphQL fields and their corresponding resolvers for the current model.
+        Fields are determined by the _graphql_fields attribute of the model.
+
+        :return: Tuple containing:
+                - fields_dict: Dictionary mapping field names to their GraphQL field types
+                - resolver_dict: Dictionary mapping field names to their resolver methods
+        '''
         fields_dict = {}
         resolver_dict = {}
 
@@ -23,9 +33,10 @@ class DynamicQueryMixin(models.AbstractModel):
         for field_name, config in graphql_fields.items():
             field = self._fields.get(field_name)
             if not field:
+                _logger.warning(f'{model_cls._name} has no field {field_name}')
                 continue
 
-            # Configuração
+            # if the add resolver status is {res:True} or just True
             if isinstance(config, dict):
                 add_resolver = config.get('res', True)
             elif isinstance(config, bool):
@@ -39,6 +50,10 @@ class DynamicQueryMixin(models.AbstractModel):
         return fields_dict, resolver_dict
 
     def _map_field_to_graphene(self, field):
+        '''
+        :param field: the field type to be mapped to graphene type
+        :return: the graphene type
+        '''
         if field.type in ('char', 'html', 'text', 'selection'):
             return graphene.String(description=field.string)
         elif field.type in ('float', 'monetary'):
@@ -86,10 +101,19 @@ class DynamicQueryMixin(models.AbstractModel):
 
     def update_graphql_type(self, model_name):
         """
-        Atualiza a classe GraphQL, adicionando campos e resolvers definidos em _graphql_fields.
+        Main function, calls the functions to gets the graphene type based on the field type, and the resolver.
+        Also calls the function to add to the OdooObjectType.
         """
+
         # Obtém os campos e resolvers definidos no modelo
         target_class = self.env[model_name]._graphql_type
+        if not target_class:
+            _logger.warning(f'Target class to add field was not provided for {model_name}. Skipping.')
+            return
+        if not isinstance(target_class, type) or not issubclass(target_class, OdooObjectType):
+            _logger.warning(f'Target class {target_class} provided was not of a valid type. Skipping.')
+            return
+
         print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
         env=self.env
         fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
@@ -107,7 +131,6 @@ class DynamicQueryMixin(models.AbstractModel):
             # Adiciona o campo à classe
             self.add_field_to_type(target_class, name, field)
 
-            # Adiciona o resolver se estiver definido
             resolver = resolvers.get(name)
             if resolver:
                 setattr(target_class, f'resolve_{name}', resolver)
@@ -116,26 +139,25 @@ class DynamicQueryMixin(models.AbstractModel):
 
     def add_field_to_type(self, type_obj, field_name, field_type, resolver=None):
         """
-        Adiciona um novo campo ao tipo GraphQL, sem afetar os campos existentes.
-        :param type_obj: O tipo GraphQL (por exemplo, `BlogPost`).
-        :param field_name: O nome do campo a ser adicionado.
-        :param field_type: O tipo do campo (por exemplo, `graphene.String()`).
-        :param resolver: A função que resolve o valor do campo (opcional).
+        Adds new field to the OdooObjectType class
+        :param type_obj: OdooObjectType class where the field needs to be added.
+        :param field_name: field name to be added.
+        :param field_type: graphene type of the field to be added.
+        :param resolver: the resolver if it needs to be added.
         """
-        # Adiciona o campo ao tipo, se ele não existir
         if not hasattr(type_obj, field_name):
-            # Adiciona o campo à classe (o tipo GraphQL)
             setattr(type_obj, field_name, field_type)
 
-            # Adiciona o resolver (se fornecido)
             if resolver:
                 setattr(type_obj, f"resolve_{field_name}", resolver)
 
-            # Adiciona o campo à _meta.fields (para facilitar busca e manutenção)
             if hasattr(type_obj, '_meta') and hasattr(type_obj._meta, 'fields'):
                 type_obj._meta.fields[field_name] = field_type
 
     def _get_subclasses(self):
+        '''
+        Obtains the classes that inherit from the current class.
+        '''
         mixin_name = self._name
         result = []
         for model_name in self.env:
@@ -149,11 +171,12 @@ class DynamicQueryMixin(models.AbstractModel):
         return result
 
     def _register_hook(self):
+        '''
+        To execute the functions when the module is loaded.
+        '''
         super()._register_hook()
         if self._name == 'dynamic.query.mixin': # avoid executing the function for the mixin itself
             return
         sub_cls=self._get_subclasses()
-        print(sub_cls)
         for cls in sub_cls:
-            print(cls)
             self.update_graphql_type(cls)

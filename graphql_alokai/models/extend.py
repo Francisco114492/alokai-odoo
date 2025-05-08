@@ -1,20 +1,17 @@
 from odoo import models, fields
 from ..schemas.objects import BlogPost
-from .dynamic_registry import DynamicQueryMixin
+from .dynamic_registry import DynamicFieldsMixin
 
 
-class ExtendedBlogPost(models.Model, DynamicQueryMixin):
+class ExtendedBlogPost(models.Model, DynamicFieldsMixin):
     _name = 'blog.post'
     _inherit = ['blog.post', 'dynamic.query.mixin']
     other_author_name = fields.Char(string="Other Author Name")
     internal_notes = fields.One2many('website',string="Internal Notes")
 
-    _graphql_fields = {
-        "other_author_name": True,  # expõe o campo com resolver
-        "internal_notes": {"res": False},  # expõe o campo sem resolver
-        "teaser": {"res": True}  # campo herdado, mas adiciona o resolver
+    _graphql_fields = { # the fields to be added and wether a resolver is needed
+        "other_author_name": True,  # expose field to graphql with resolver
+        "internal_notes": False,  # expose field to graphql without resolver
+        "teaser": {"res": True}  # field already exists, we just add the resolver
     }
-    _graphql_type = BlogPost
-
-
-
+    _graphql_type = BlogPost # the OdooObjectType class where the graphene fields will be added
