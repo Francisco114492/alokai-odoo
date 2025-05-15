@@ -1,7 +1,11 @@
-from odoo import models, api
+
 import graphene
-from odoo.addons.graphql_base import OdooObjectType
 import logging
+
+from odoo import models, api
+
+from odoo.addons.graphql_base import OdooObjectType
+
 
 _logger = logging.getLogger(__name__)
 
@@ -9,6 +13,93 @@ class DynamicFieldsMixin(models.AbstractModel):
     _name = 'dynamic.query.mixin'
     _description = 'Mixin para criação automática da query'
     _abstract = True
+
+    def update_graphql_type(self, model_name):
+        """
+        Main function, calls the functions to gets the graphene type based on the field type, and the resolver.
+        Also calls the function to add to the OdooObjectType._graphql_type
+        """
+
+        # Obtém os campos e resolvers definidos no modelo
+        target_class = self.env[model_name]._graphql_type
+        target_class_input = getattr(self.env[model_name], '_graphql_filter_input', None)
+        if not target_class:
+            _logger.warning(f'Target class to add field was not provided for {model_name}. Skipping.')
+            return
+        if not isinstance(target_class, type) or not issubclass(target_class, OdooObjectType):
+            _logger.warning(f'Target class {target_class} provided was not of a valid type. Skipping.')
+            return
+
+        print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        env=self.env
+        fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
+
+        # Obtém os campos já existentes no tipo GraphQL
+        existing_fields = set()
+        if hasattr(target_class, '_meta') and hasattr(target_class._meta, 'fields'):
+            existing_fields = set(target_class._meta.fields.keys())
+
+        for name, field in fields_dict.items():
+            if isinstance(field, graphene.Field):
+                new_field = field
+            else:
+                new_field = graphene.Field(field)
+
+            if name not in existing_fields:
+                self.add_field_to_type(target_class, name, new_field)
+
+            if new_field:
+                self.add_field_to_type(target_class, name, new_field)
+
+            print(model_name)
+            if target_class_input:
+                print("a")
+                self.add_field_to_filter_input(target_class_input, name, field)
+            resolver = resolvers.get(name)
+            if resolver:
+                setattr(target_class, f'resolve_{name}', resolver)
+        print(f"Depois: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        return target_class
+
+    def add_field_to_type(self, type_obj, field_name, field_type, resolver=None):
+        """
+        Adds new field to the OdooObjectType class
+        :param type_obj: OdooObjectType class where the field needs to be added.
+        :param field_name: field name to be added.
+        :param field_type: graphene type of the field to be added.
+        :param resolver: the resolver if it needs to be added.
+        """
+        if not hasattr(type_obj, field_name):
+            setattr(type_obj, field_name, field_type)
+
+            if resolver:
+                setattr(type_obj, f"resolve_{field_name}", resolver)
+
+            if hasattr(type_obj, '_meta') and hasattr(type_obj._meta, 'fields'):
+                type_obj._meta.fields[field_name] = field_type
+
+    def add_field_to_filter_input(self, target_class, field_name, field_type):
+        '''
+        Adds new field to the InputObjectType class
+        :param target_class: InputObjectType class where the field needs to be added.
+        :param field_name: field name to be added.
+        :param field_type: graphene type of the field to be added.
+        '''
+        print(f'InputField antes em {target_class.__name__} = {list(target_class._meta.fields.keys())}')
+        if isinstance(field_type, graphene.Field):
+            base_type = field_type._type
+        else:
+            base_type = field_type
+
+            # Verifica se é um tipo de input GraphQL válido
+        if not (isinstance(base_type, type) and issubclass(base_type, graphene.InputObjectType)) \
+                and not isinstance(base_type, graphene.Scalar):
+            _logger.warning(f'Field "{field_name}" with type {base_type} is not a valid GraphQL input type. Skipping.')
+            return
+
+        input_field = graphene.InputField(base_type)
+        target_class._meta.fields[field_name] = input_field
+        print(f'InputField depois em {target_class.__name__} = {list(target_class._meta.fields.keys())}')
 
     @api.model
     def get_graphql_fields_and_resolvers(self):
@@ -98,61 +189,6 @@ class DynamicFieldsMixin(models.AbstractModel):
         def resolver(parent, info):
             return getattr(parent, field_name, None)
         return resolver
-
-    def update_graphql_type(self, model_name):
-        """
-        Main function, calls the functions to gets the graphene type based on the field type, and the resolver.
-        Also calls the function to add to the OdooObjectType.
-        """
-
-        # Obtém os campos e resolvers definidos no modelo
-        target_class = self.env[model_name]._graphql_type
-        if not target_class:
-            _logger.warning(f'Target class to add field was not provided for {model_name}. Skipping.')
-            return
-        if not isinstance(target_class, type) or not issubclass(target_class, OdooObjectType):
-            _logger.warning(f'Target class {target_class} provided was not of a valid type. Skipping.')
-            return
-
-        print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
-        env=self.env
-        fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
-
-        # Obtém os campos já existentes no tipo GraphQL
-        existing_fields = set()
-        if hasattr(target_class, '_meta') and hasattr(target_class._meta, 'fields'):
-            existing_fields = set(target_class._meta.fields.keys())
-
-        for name, field in fields_dict.items():
-            if name in existing_fields: # verifica a existencia do campo no  graphql
-                continue
-            if not isinstance(field, graphene.Field):
-                field = graphene.Field(field)
-            # Adiciona o campo à classe
-            self.add_field_to_type(target_class, name, field)
-
-            resolver = resolvers.get(name)
-            if resolver:
-                setattr(target_class, f'resolve_{name}', resolver)
-        print(f"Depois: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
-        return target_class
-
-    def add_field_to_type(self, type_obj, field_name, field_type, resolver=None):
-        """
-        Adds new field to the OdooObjectType class
-        :param type_obj: OdooObjectType class where the field needs to be added.
-        :param field_name: field name to be added.
-        :param field_type: graphene type of the field to be added.
-        :param resolver: the resolver if it needs to be added.
-        """
-        if not hasattr(type_obj, field_name):
-            setattr(type_obj, field_name, field_type)
-
-            if resolver:
-                setattr(type_obj, f"resolve_{field_name}", resolver)
-
-            if hasattr(type_obj, '_meta') and hasattr(type_obj._meta, 'fields'):
-                type_obj._meta.fields[field_name] = field_type
 
     def _get_subclasses(self):
         '''

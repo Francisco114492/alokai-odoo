@@ -1,6 +1,7 @@
 from odoo import models, fields
 from ..schemas.objects import BlogPost
 from .dynamic_registry import DynamicFieldsMixin
+from ..schemas.website_blog import BlogPostFilterInput
 
 
 class ExtendedBlogPost(models.Model, DynamicFieldsMixin):
@@ -15,3 +16,4 @@ class ExtendedBlogPost(models.Model, DynamicFieldsMixin):
         "teaser": {"res": True}  # field already exists, we just add the resolver
     }
     _graphql_type = BlogPost # the OdooObjectType class where the graphene fields will be added
+    _graphql_filter_input = BlogPostFilterInput

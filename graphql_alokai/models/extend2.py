@@ -18,4 +18,3 @@ class ExtendedCompany(models.Model, DynamicFieldsMixin):
         # vai dar warning porque não há campo teaser na company
     }
     _graphql_type = Company # the OdooObjectType class where the graphene fields will be added
-
