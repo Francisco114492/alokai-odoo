@@ -13,5 +13,5 @@ from . import sale_order
 from . import alokai_website_page
 from . import stock
 from . import dynamic_registry
-from . import extend
-from . import extend2
+#from . import extend
+#from . import extend2

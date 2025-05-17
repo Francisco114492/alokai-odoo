@@ -75,9 +75,5 @@ def build_alokai_schema():
     print(type_registry)
     print(query_registry)
     print(mutation_registry)
-    '''for tipo in type_registry:
-        print(f'type: {tipo.__name__}')
-        if tipo.__name__=='BlogPost':
-            for field_name, field in tipo._meta.fields.items():
-                print(f"- {field_name}: {tipo(field)}")'''
+
     return graphene.Schema(query=Query, mutation=Mutation, types=type_registry)

@@ -7,6 +7,7 @@ from odoo import models, api
 from odoo.addons.graphql_base import OdooObjectType
 
 
+
 _logger = logging.getLogger(__name__)
 
 class DynamicFieldsMixin(models.AbstractModel):
@@ -19,18 +20,19 @@ class DynamicFieldsMixin(models.AbstractModel):
         Main function, calls the functions to gets the graphene type based on the field type, and the resolver.
         Also calls the function to add to the OdooObjectType._graphql_type
         """
-
         # Obtém os campos e resolvers definidos no modelo
-        target_class = self.env[model_name]._graphql_type
+        target_class = getattr(self.env[model_name], '_graphql_type', None)
         target_class_input = getattr(self.env[model_name], '_graphql_filter_input', None)
+
+        target_class=self.verify_class(target_class, model_name, OdooObjectType)
+        target_class_input=self.verify_class(target_class_input, model_name, graphene.InputObjectType)
         if not target_class:
-            _logger.warning(f'Target class to add field was not provided for {model_name}. Skipping.')
             return
-        if not isinstance(target_class, type) or not issubclass(target_class, OdooObjectType):
-            _logger.warning(f'Target class {target_class} provided was not of a valid type. Skipping.')
+        if not target_class_input:
             return
 
         print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        print(f"Antes: campos em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}")
         env=self.env
         fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
 
@@ -51,15 +53,31 @@ class DynamicFieldsMixin(models.AbstractModel):
             if new_field:
                 self.add_field_to_type(target_class, name, new_field)
 
-            print(model_name)
             if target_class_input:
-                print("a")
                 self.add_field_to_filter_input(target_class_input, name, field)
             resolver = resolvers.get(name)
             if resolver:
                 setattr(target_class, f'resolve_{name}', resolver)
         print(f"Depois: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        if target_class_input:
+            print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
         return target_class
+
+    def verify_class(self, cls, model_name, exp_type):
+        if not isinstance(cls, type):
+            _logger.info(f"Target class to add field for {model_name} doesn't exist. Creating.")
+            class_name = "".join(part.capitalize() for part in model_name.split("."))
+            if exp_type == OdooObjectType:
+                class_name = f"{class_name}Type"
+            else:
+                class_name = f"{class_name}FilterInput"
+            target_class = type(f"{class_name}", (exp_type,), {})
+            setattr(type(self.env[model_name]), '_graphql_type', target_class)
+            return target_class
+        if not issubclass(cls, exp_type):
+            _logger.warning(f'Target class {cls} provided was not of a valid type. Skipping.')
+            return None
+        return cls
 
     def add_field_to_type(self, type_obj, field_name, field_type, resolver=None):
         """
@@ -85,7 +103,6 @@ class DynamicFieldsMixin(models.AbstractModel):
         :param field_name: field name to be added.
         :param field_type: graphene type of the field to be added.
         '''
-        print(f'InputField antes em {target_class.__name__} = {list(target_class._meta.fields.keys())}')
         if isinstance(field_type, graphene.Field):
             base_type = field_type._type
         else:
@@ -99,7 +116,6 @@ class DynamicFieldsMixin(models.AbstractModel):
 
         input_field = graphene.InputField(base_type)
         target_class._meta.fields[field_name] = input_field
-        print(f'InputField depois em {target_class.__name__} = {list(target_class._meta.fields.keys())}')
 
     @api.model
     def get_graphql_fields_and_resolvers(self):
