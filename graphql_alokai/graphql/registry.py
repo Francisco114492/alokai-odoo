@@ -61,7 +61,6 @@ def build_alokai_schema():
     Dynamically build the final GraphQL schema by inheriting
     from all partial query and mutation classes in the registry.
     """
-    traceback.print_stack()
     Query = type(
         "Query",
         tuple(query_registry + [BaseQuery]),

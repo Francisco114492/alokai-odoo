@@ -69,6 +69,16 @@ class DynamicFieldsMixin(models.AbstractModel):
             setattr(model_cls, attr_name, target_class)
             if issubclass(target_class, OdooObjectType):
                 add_or_replace(type_registry,target_class)
+            if issubclass(target_class, graphene.InputObjectType):
+                qry_cls_name=f'{class_base}Query'
+                qry_cls=type(qry_cls_name, (graphene.ObjectType,),{
+                    f"{model_name.replace('.', '_')}_list": graphene.List(
+                        graphene.String,  # ou qualquer tipo de saída real
+                        filters=graphene.Argument(target_class)
+                    ),
+                    f"resolve_{model_name.replace('.', '_')}_list": lambda *_: ["Exemplo"]
+                })
+                add_or_replace(query_registry,[qry_cls])
             return target_class
         if not issubclass(cls, exp_type):
             _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of {exp_type.__name__}. Skipping.')

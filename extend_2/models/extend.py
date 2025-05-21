@@ -7,14 +7,14 @@ from odoo.addons.graphql_alokai.models.dynamic_registry import DynamicFieldsMixi
 
 class ExtendedCompany(models.Model, DynamicFieldsMixin):
     _name = 'res.company'
-    _inherit = ['res.company', 'dynamic.query.mixin']
+    _inherit = ['res.company', 'dynamic.registry.mixin']
     other_author_name = fields.Char(string="Other Author Name")
     internal_notes_2 = fields.Integer(string="Internal Notes")
 
     _graphql_fields = { # the fields to be added and wether a resolver is needed
-        "other_author_name": True,  # expose field to graphql with resolver
-        "internal_notes_2": False,  # expose field to graphql without resolver
-        "teaser": {"res": True}  # campo herdado, mas adiciona o resolver
-        # vai dar warning porque não há campo teaser na company
+        "other_author_name": {"res": True, 'filter_input':True},  # expose field to graphql with resolver
+        "internal_notes_2": {"res": False, 'filter_input':False},  # expose field to graphql without resolver
+        "teaser": {"res": True, 'filter_input':False}
     }
     _graphql_type = Company # the OdooObjectType class where the graphene fields will be added
+    #_graphql_filter_input =
