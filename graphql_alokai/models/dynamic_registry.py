@@ -3,79 +3,75 @@ import graphene
 import logging
 
 from odoo import models, api
-
 from odoo.addons.graphql_base import OdooObjectType
+from ..graphql.registry import type_registry, query_registry, mutation_registry, add_or_replace
 
 
 
 _logger = logging.getLogger(__name__)
 
 class DynamicFieldsMixin(models.AbstractModel):
-    _name = 'dynamic.query.mixin'
+    _name = 'dynamic.registry.mixin'
     _description = 'Mixin para criação automática da query'
     _abstract = True
 
     def update_graphql_type(self, model_name):
-        """
-        Main function, calls the functions to gets the graphene type based on the field type, and the resolver.
-        Also calls the function to add to the OdooObjectType._graphql_type
-        """
-        # Obtém os campos e resolvers definidos no modelo
         target_class = getattr(self.env[model_name], '_graphql_type', None)
         target_class_input = getattr(self.env[model_name], '_graphql_filter_input', None)
 
-        target_class=self.verify_class(target_class, model_name, OdooObjectType)
-        target_class_input=self.verify_class(target_class_input, model_name, graphene.InputObjectType)
+        target_class = self.verify_class(target_class, model_name, OdooObjectType, '_graphql_type')
+        target_class_input = self.verify_class(target_class_input, model_name, graphene.InputObjectType,'_graphql_filter_input')
+
         if not target_class:
             return
-        if not target_class_input:
-            return
+        print(f"Antes campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
+        print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
 
-        print(f"Antes: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
-        print(f"Antes: campos em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}")
-        env=self.env
-        fields_dict, resolvers = env[model_name].get_graphql_fields_and_resolvers()
-
-        # Obtém os campos já existentes no tipo GraphQL
-        existing_fields = set()
-        if hasattr(target_class, '_meta') and hasattr(target_class._meta, 'fields'):
-            existing_fields = set(target_class._meta.fields.keys())
+        fields_dict, resolvers = self.env[model_name].get_graphql_fields_and_resolvers()
+        existing_fields = set(getattr(target_class._meta, 'fields', {}).keys())
 
         for name, field in fields_dict.items():
-            if isinstance(field, graphene.Field):
-                new_field = field
-            else:
-                new_field = graphene.Field(field)
-
             if name not in existing_fields:
+                new_field = graphene.Field(field) if not isinstance(field, graphene.Field) else field
                 self.add_field_to_type(target_class, name, new_field)
 
-            if new_field:
-                self.add_field_to_type(target_class, name, new_field)
-
-            if target_class_input:
+            # Só adiciona ao filter input se o campo tiver essa flag
+            if getattr(self.env[model_name], "_graphql_fields", {}).get(name, {}).get(
+                    'filter_input') and target_class_input:
                 self.add_field_to_filter_input(target_class_input, name, field)
-            resolver = resolvers.get(name)
-            if resolver:
-                setattr(target_class, f'resolve_{name}', resolver)
+
+            if getattr(self.env[model_name], "_graphql_fields", {}).get(name, {}).get('res'):
+                resolver = resolvers.get(name)
+                if resolver:
+                    setattr(target_class, f'resolve_{name}', resolver)
+
         print(f"Depois: campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
         if target_class_input:
             print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
         return target_class
 
-    def verify_class(self, cls, model_name, exp_type):
+    def verify_class(self, cls, model_name, exp_type, attr_name):
+        '''
+        VErify the existance of cls and if it's a subclass of exp_type
+        :param cls: the class to be verified
+        :param model_name: the name of the model from which the fields come from
+        :param exp_type: OdooObjectType or graphene.InputObjectType
+        :param attr_name:
+        :return: the target class if it's valid or a new one if doesn't exist
+        '''
+        model_cls = type(self.env[model_name])
         if not isinstance(cls, type):
-            _logger.info(f"Target class to add field for {model_name} doesn't exist. Creating.")
-            class_name = "".join(part.capitalize() for part in model_name.split("."))
-            if exp_type == OdooObjectType:
-                class_name = f"{class_name}Type"
-            else:
-                class_name = f"{class_name}FilterInput"
-            target_class = type(f"{class_name}", (exp_type,), {})
-            setattr(type(self.env[model_name]), '_graphql_type', target_class)
+            _logger.info(f"{attr_name} for {model_name} doesn't exist. Creating.")
+            class_base = "".join(part.capitalize() for part in model_name.split("."))
+            suffix = "Type" if exp_type == OdooObjectType else "FilterInput"
+            class_name = f"{class_base}{suffix}"
+            target_class = type(class_name, (exp_type,), {})
+            setattr(model_cls, attr_name, target_class)
+            if issubclass(target_class, OdooObjectType):
+                add_or_replace(type_registry,target_class)
             return target_class
         if not issubclass(cls, exp_type):
-            _logger.warning(f'Target class {cls} provided was not of a valid type. Skipping.')
+            _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of {exp_type.__name__}. Skipping.')
             return None
         return cls
 
@@ -227,8 +223,9 @@ class DynamicFieldsMixin(models.AbstractModel):
         To execute the functions when the module is loaded.
         '''
         super()._register_hook()
-        if self._name == 'dynamic.query.mixin': # avoid executing the function for the mixin itself
+        if self._name == 'dynamic.registry.mixin': # avoid executing the function for the mixin itself
             return
         sub_cls=self._get_subclasses()
+        from ..graphql.registry import type_registry, mutation_registry, query_registry
         for cls in sub_cls:
             self.update_graphql_type(cls)

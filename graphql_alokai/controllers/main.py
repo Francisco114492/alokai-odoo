@@ -16,7 +16,20 @@ from werkzeug.exceptions import Forbidden
 
 
 _logger = logging.getLogger(__name__)
+import sys
+import traceback
 
+print(">> PATH DO MODULO:", __file__)
+print(">> sys.path:")
+for p in sys.path:
+    print("   ", p)
+for name, mod in sys.modules.items():
+    try:
+        if getattr(mod, '__file__', None) and 'graphql_alokai' in mod.__file__:
+            print(f"Carregado como: {name}, caminho: {mod.__file__}")
+    except Exception:
+        pass
+#traceback.print_stack()
 
 from ..graphql.registry import build_alokai_schema
 

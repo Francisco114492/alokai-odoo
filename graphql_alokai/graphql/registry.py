@@ -4,6 +4,7 @@
 
 import graphene
 from odoo.addons.graphql_base import OdooObjectType
+import traceback
 
 query_registry = []
 mutation_registry = []
@@ -60,7 +61,7 @@ def build_alokai_schema():
     Dynamically build the final GraphQL schema by inheriting
     from all partial query and mutation classes in the registry.
     """
-
+    traceback.print_stack()
     Query = type(
         "Query",
         tuple(query_registry + [BaseQuery]),
