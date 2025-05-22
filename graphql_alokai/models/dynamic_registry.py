@@ -90,7 +90,7 @@ class DynamicFieldsMixin(models.AbstractModel):
             class_name = f"{class_base}Type"
             target_class = type(class_name, (OdooObjectType,), {})
             setattr(model_cls, attr_name, target_class)
-            add_or_replace(type_registry,target_class)
+            add_or_replace(type_registry,[target_class])
             return target_class
         if not issubclass(cls, OdooObjectType):
             _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of {OdooObjectType}. Skipping.')
