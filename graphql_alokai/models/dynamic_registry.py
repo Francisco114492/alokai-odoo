@@ -19,13 +19,14 @@ class DynamicFieldsMixin(models.AbstractModel):
         target_class = getattr(self.env[model_name], '_graphql_type', None)
         target_class_input = getattr(self.env[model_name], '_graphql_filter_input', None)
 
-        target_class = self.verify_class(target_class, model_name, OdooObjectType, '_graphql_type')
-        target_class_input = self.verify_class(target_class_input, model_name, graphene.InputObjectType,'_graphql_filter_input')
+        target_class = self.verify_class(target_class, model_name, '_graphql_type')
+        target_class_input = self.verify_class_input(target_class_input, model_name,'_graphql_filter_input')
 
         if not target_class:
             return
         print(f"Antes campos em {target_class.__name__} = {list(target_class._meta.fields.keys())}")
-        print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
+        if target_class_input:
+            print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
 
         fields_dict, resolvers = self.env[model_name].get_graphql_fields_and_resolvers()
         existing_fields = set(getattr(target_class._meta, 'fields', {}).keys())
@@ -50,12 +51,35 @@ class DynamicFieldsMixin(models.AbstractModel):
             print(f'InputField depois em {target_class_input.__name__} = {list(target_class_input._meta.fields.keys())}')
         return target_class
 
-    def verify_class(self, cls, model_name, exp_type, attr_name):
+    @staticmethod
+    def verify_class_input(cls, model_name, attr_name, ):
+        if not cls:
+            _logger.warning(f'{attr_name} for {model_name} doesn\'t exist. Skipping.')
+            return None
+        if isinstance(cls, str):
+            qry_cls_name=f"{cls}Query"
+            class_name = f"{cls}FilterInput"
+            target_class = type(class_name, (graphene.InputObjectType,), {})
+            qry_cls = type(qry_cls_name, (graphene.ObjectType,), {
+                f"{model_name.replace('.', '_')}_list": graphene.List(
+                    graphene.String,  # ou qualquer tipo de saída real
+                    filters=graphene.Argument(target_class)
+                ),
+                f"resolve_{model_name.replace('.', '_')}_list": lambda *_: ["Exemplo"]
+            })
+            add_or_replace(query_registry, [qry_cls])
+            return target_class
+        if not issubclass(cls, graphene.InputObjectType):
+            _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of InputObjectType. Skipping.')
+            return None
+        return cls
+
+    def verify_class(self, cls, model_name, attr_name):
         '''
-        VErify the existance of cls and if it's a subclass of exp_type
+        Verify the existance of cls and if it's a subclass of exp_type
         :param cls: the class to be verified
         :param model_name: the name of the model from which the fields come from
-        :param exp_type: OdooObjectType or graphene.InputObjectType
+        :param exp_type: OdooObjectType
         :param attr_name:
         :return: the target class if it's valid or a new one if doesn't exist
         '''
@@ -63,25 +87,13 @@ class DynamicFieldsMixin(models.AbstractModel):
         if not isinstance(cls, type):
             _logger.info(f"{attr_name} for {model_name} doesn't exist. Creating.")
             class_base = "".join(part.capitalize() for part in model_name.split("."))
-            suffix = "Type" if exp_type == OdooObjectType else "FilterInput"
-            class_name = f"{class_base}{suffix}"
-            target_class = type(class_name, (exp_type,), {})
+            class_name = f"{class_base}Type"
+            target_class = type(class_name, (OdooObjectType,), {})
             setattr(model_cls, attr_name, target_class)
-            if issubclass(target_class, OdooObjectType):
-                add_or_replace(type_registry,target_class)
-            if issubclass(target_class, graphene.InputObjectType):
-                qry_cls_name=f'{class_base}Query'
-                qry_cls=type(qry_cls_name, (graphene.ObjectType,),{
-                    f"{model_name.replace('.', '_')}_list": graphene.List(
-                        graphene.String,  # ou qualquer tipo de saída real
-                        filters=graphene.Argument(target_class)
-                    ),
-                    f"resolve_{model_name.replace('.', '_')}_list": lambda *_: ["Exemplo"]
-                })
-                add_or_replace(query_registry,[qry_cls])
+            add_or_replace(type_registry,target_class)
             return target_class
-        if not issubclass(cls, exp_type):
-            _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of {exp_type.__name__}. Skipping.')
+        if not issubclass(cls, OdooObjectType):
+            _logger.warning(f'{attr_name} {cls} for {model_name} is not a subclass of {OdooObjectType}. Skipping.')
             return None
         return cls
 

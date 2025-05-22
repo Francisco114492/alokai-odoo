@@ -17,4 +17,4 @@ class ExtendedCompany(models.Model, DynamicFieldsMixin):
         "teaser": {"res": True, 'filter_input':False}
     }
     _graphql_type = Company # the OdooObjectType class where the graphene fields will be added
-    #_graphql_filter_input =
+    _graphql_filter_input = 'ok'

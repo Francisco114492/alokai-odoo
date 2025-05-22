@@ -19,5 +19,6 @@ This module extends and adds some fields to graphql
     ],
     'installable': True,
     'application': False,
+    'auto_install': True,
     'license': 'LGPL-3',
 }
