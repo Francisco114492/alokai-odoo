@@ -38,7 +38,9 @@ PaymentTransactionState = graphene.Enum('PaymentTransactionState', [('Draft', 'd
                                                                ('Authorized', 'authorized'), ('Confirmed', 'done'),
                                                                ('Canceled', 'cancel'), ('Error', 'error')])
 
-PageType = graphene.Enum('PageType', [('StaticPage', 'static'), ('ProductsPage', 'products')])
+class PageTypeEnum(graphene.Enum):
+    STATIC = 'static'
+    PRODUCTS = 'products'
 
 
 class SortEnum(graphene.Enum):
@@ -160,7 +162,7 @@ class Country(OdooObjectType):
     image_url = graphene.String()
 
     def resolve_states(self, info):
-        return self.state_ids or None
+        return self.state_ids.sorted('name') or None
 
 
 class Company(OdooObjectType):
@@ -286,7 +288,8 @@ class Partner(OdooObjectType):
 
     def resolve_is_public(self, info):
         website = self.env['website'].get_current_website()
-        return True if not self or not self.user_ids or self.user_ids == website.user_id else False
+        user = self.with_context(active_test=False).user_ids
+        return True if not self or (user and user == website.user_id) else False
 
     def resolve_company_name(self, info):
         company = get_parent_company(self)
@@ -361,6 +364,7 @@ class Category(OdooObjectType):
     meta_keyword = graphene.String()
     meta_description = graphene.String()
     meta_image = graphene.String()
+    breadcrumb = generic.GenericScalar()
 
     def resolve_image(self, info):
         return get_image_url(self, field_name='image_1920')
@@ -529,6 +533,8 @@ class Product(OdooObjectType):
     json_ld = generic.GenericScalar()
     tags = graphene.List(graphene.NonNull(lambda: ProductTag))
     alokai_pages = graphene.List(graphene.NonNull(lambda: WebsitePage))
+    breadcrumb = generic.GenericScalar()
+    json_ld_breadcrumb = generic.GenericScalar()
 
     def resolve_type_id(self, info):
         if self.type == 'consu':
@@ -537,10 +543,7 @@ class Product(OdooObjectType):
             return 'configurable'
 
     def resolve_visibility(self, info):
-        if self.website_published:
-            return 1
-        else:
-            return 0
+        return int(self.is_published)
 
     def resolve_status(self, info):
         free_qty = 0
@@ -603,10 +606,7 @@ class Product(OdooObjectType):
         return self.website_ribbon_id or None
 
     def resolve_is_in_stock(self, info):
-        if self._name == 'product.template':
-            return bool(sum(self.product_variant_ids.mapped('free_qty')) > 0)
-        else:
-            return bool(self.free_qty > 0)
+        return self.has_stock
 
     # TODO: check request object does not contain website
     def resolve_is_in_wishlist(self, info):
@@ -781,6 +781,9 @@ class Product(OdooObjectType):
 
     def resolve_alokai_pages(self, info):
         return self.alokai_page_ids or None
+
+    def resolve_json_ld_breadcrumb(self, info):
+        return self and self.get_json_ld_breadcrumb() or None
 
 
 class Payment(OdooObjectType):
@@ -1165,7 +1168,7 @@ class WebsiteMenuImage(OdooObjectType):
 
 class WebsitePage(OdooObjectType):
     id = graphene.Int()
-    page_type = PageType()
+    page_type = PageTypeEnum()
     name = graphene.String()
     website_url = graphene.String()
     is_published = graphene.Boolean()

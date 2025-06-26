@@ -12,11 +12,12 @@ from odoo.exceptions import ValidationError
 
 
 class ProductTemplate(models.Model):
-    _inherit = 'product.template'
+    _name = 'product.template'
+    _inherit = ['product.template', 'website.slug.redis.mixin']
 
     @api.model
     def _graphql_get_search_order(self, sort):
-        sorting = ''
+        sorting = 'has_stock DESC'
         for field, val in sort.items():
             if sorting:
                 sorting += ', '
@@ -76,7 +77,7 @@ class ProductTemplate(models.Model):
         if search:
             for srch in search.split(" "):
                 domains.append([
-                    '|', '|', ('name', 'ilike', srch), ('description_sale', 'like', srch), ('default_code', 'like', srch)])
+                    '|', '|', ('name', 'ilike', srch), ('description_sale', 'ilike', srch), ('default_code', 'ilike', srch)])
 
         # Used for improving attributes filtering
         attributes_partial_domain = domains.copy()
@@ -164,6 +165,49 @@ class ProductTemplate(models.Model):
 
             product.json_ld = json.dumps(json_ld)
 
+    def _get_breadcrumb_category(self, categories, category):
+        categories.append({
+            'name': category.name,
+            'slug': category.website_slug,
+        })
+        if category.parent_id:
+            categories = self._get_breadcrumb_category(categories, category.parent_id)
+        return categories
+
+    def _compute_breadcrumb(self):
+        for product in self:
+            categories = []
+            if product.public_categ_ids[0]:
+                categories = product._get_breadcrumb_category([], product.public_categ_ids[0])
+                categories.reverse()
+            product.breadcrumb = json.dumps(categories)
+
+    def get_json_ld_breadcrumb(self):
+        items = []
+
+        if self.public_categ_ids:
+            website = self.env['website'].get_current_website()
+            domain = website.domain or ''
+            if domain and domain[-1] == '/':
+                domain = domain[:-1]
+
+            categories = self._get_breadcrumb_category([], self.public_categ_ids[0])
+            categories.reverse()
+
+            for index, category in enumerate(categories):
+                items.append({
+                    "@type": "ListItem",
+                    "position": index + 1,
+                    "name": category['name'],
+                    "item": f"{domain}{category['slug']}"
+                })
+
+        return {
+            "@context": "https://schema.org/",
+            "@type": "BreadcrumbList",
+            "itemListElement": items
+        }
+
     def _get_public_categ_slug(self, category_ids, category):
         category_ids.append(category.id)
 
@@ -194,7 +238,7 @@ class ProductTemplate(models.Model):
                     VALUES(%s, %s);
                 """, (product.id, category_id,))
 
-    @api.depends('name')
+    @api.depends('name', 'default_code')
     def _compute_website_slug(self):
         langs = self.env['res.lang'].search([])
 
@@ -209,7 +253,7 @@ class ProductTemplate(models.Model):
                     slug_name = self.env['ir.http']._slugify(product.name or '').strip().strip('-')
                     product.website_slug = f'{prefix}/{slug_name}-{product.id}'
 
-    @api.depends('product_variant_ids')
+    @api.depends('product_variant_ids', 'product_variant_id', 'attribute_line_ids')
     def _compute_variant_attribute_value_ids(self):
         """
         Used to filter attribute values on the website.
@@ -284,22 +328,30 @@ class ProductTemplate(models.Model):
         'alokai.website.page', 'product_template_alokai_website_page_rel', 'product_tmpl_id', 'alokai_page_id',
         string='Alokai Website Pages'
     )
+    has_stock = fields.Boolean(string='Has Stock', compute='_compute_has_stock', store=True)
+
+    @api.depends('product_variant_ids.product_redis_stock_ids')
+    def _compute_has_stock(self):
+        for template in self:
+            template.has_stock = sum(template.product_variant_ids.mapped('product_redis_stock_ids.quantity')) > 0
 
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
             if vals.get('website_published'):
                 vals['published_datetime'] = datetime.now()
+
         return super(ProductTemplate, self).create(vals_list)
 
     def write(self, vals):
         if 'website_published' in vals:
             for product in self:
-                if vals['website_published'] and not product.website_published:
+                if vals['website_published'] and not product.website_published and not product.published_datetime:
                     vals['published_datetime'] = datetime.now()
 
         res = super(ProductTemplate, self).write(vals)
         self.env['invalidate.cache'].create_invalidate_cache(self._name, self.ids)
+
         return res
 
     def unlink(self):
@@ -333,9 +385,16 @@ class ProductTemplate(models.Model):
     @api.model
     def calculate_frequently_bought_together(self):
         ProductTemplateFBT = self.env['product.template.fbt']
-
         ProductTemplateFBT.search([]).unlink()
-        sale_groups = self.env['sale.report'].search([])
+
+        lookback_days = int(self.env['ir.config_parameter'].sudo().get_param('alokai_recent_sales_count_days', 30))
+        date_days_ago = fields.Datetime.now() - timedelta(days=lookback_days)
+        done_states = self.env['sale.report'].sudo()._get_done_states()
+        domain = [
+            ('state', 'in', done_states),
+            ('date', '>=', date_days_ago),
+        ]
+        sale_groups = self.env['sale.report'].search(domain)
 
         order_to_products = defaultdict(list)
         for sale_group in sale_groups:
@@ -394,6 +453,12 @@ class ProductProduct(models.Model):
     _inherit = 'product.product'
 
     product_redis_stock_ids = fields.One2many('product.product.redis_stock', 'product_id', 'Redis Stock', readonly=True)
+    has_stock = fields.Boolean(string='Has Stock', compute='_compute_has_stock', store=True)
+
+    @api.depends('product_redis_stock_ids')
+    def _compute_has_stock(self):
+        for product in self:
+            product.has_stock = sum(product.product_redis_stock_ids.mapped('quantity')) > 0
 
     def _compute_json_ld(self):
         env = self.env
@@ -529,7 +594,8 @@ class ProductTemplateRedisStock(models.Model):
 
 
 class ProductPublicCategory(models.Model):
-    _inherit = 'product.public.category'
+    _name = 'product.public.category'
+    _inherit = ['product.public.category', 'website.slug.redis.mixin']
 
     def _compute_json_ld(self):
         website = self.env['website'].get_current_website()
@@ -546,6 +612,21 @@ class ProductPublicCategory(models.Model):
             }
 
             category.json_ld = json.dumps(json_ld)
+
+    def _get_breadcrumb_category(self, categories, category):
+        categories.append({
+            'name': category.name,
+            'slug': category.website_slug,
+        })
+        if category.parent_id:
+            categories = self._get_breadcrumb_category(categories, category.parent_id)
+        return categories
+
+    def _compute_breadcrumb(self):
+        for category in self:
+            categories = category._get_breadcrumb_category([], category)
+            categories.reverse()
+            category.breadcrumb = json.dumps(categories)
 
     def _validate_website_slug(self):
         for category in self.filtered(lambda c: c.website_slug):

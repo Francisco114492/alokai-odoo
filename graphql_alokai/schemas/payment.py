@@ -81,9 +81,12 @@ class PaymentQuery(graphene.ObjectType):
         env = info.context["env"]
 
         PaymentTransaction = env['payment.transaction']
-        Order = env['sale.order']
+        Order = env['sale.order'].sudo()
+
         # Pass in the session the sale_order created in alokai
         payment_transaction_id = request.session.get('__payment_monitored_tx_id__')
+        order_id = request.session.get('sale_order_id')
+        order = Order.search([('id', '=', order_id)], limit=1)
 
         if payment_transaction_id:
             payment_transaction = PaymentTransaction.sudo().search([('id', '=', payment_transaction_id)], limit=1)
@@ -92,8 +95,8 @@ class PaymentQuery(graphene.ObjectType):
             if sale_order_id:
                 order = Order.sudo().search([('id', '=', sale_order_id)], limit=1)
 
-                if order.exists():
-                    return CartData(order=order)
+        if order.exists():
+            return CartData(order=order)
 
         raise GraphQLError(_('Cart does not exist'))
 

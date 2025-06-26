@@ -77,7 +77,7 @@ class SetShippingMethod(graphene.Mutation):
 
         delivery_method = env['delivery.carrier'].sudo().search([
             ('id', '=', shipping_method_id),
-            ('website_published', '=', True)], limit=1
+            ('is_published', '=', True)], limit=1
         )
         if not delivery_method:
             raise GraphQLError(_('Shipping method does not exist.'))
@@ -118,7 +118,15 @@ class CartAddMultipleItems(graphene.Mutation):
             product_id = product['id']
             quantity = product['quantity']
             order._cart_update(product_id=product_id, add_qty=quantity)
-        return CartData(order=order)
+
+        fbt = order.\
+            mapped('order_line').\
+            mapped('product_id').\
+            mapped('product_tmpl_id').\
+            frequently_bought_together_ids.\
+            sorted(key=lambda r: r.qty, reverse=True)
+        fbt = fbt.mapped('related_product_id')
+        return CartData(order=order, frequently_bought_together=fbt)
 
 
 class CartUpdateMultipleItems(graphene.Mutation):
